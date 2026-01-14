@@ -1,0 +1,22 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "x64\\Debug\\LibretroHost.h.obj",
+            "outputs": [
+                "C:\\Users\\Iarley\\source\\repos\\Syncade\\Syncade\\x64\\Debug\\vc145.pdb",
+                "x64\\Debug\\",
+                "C:\\Users\\Iarley\\source\\repos\\Syncade\\Syncade\\x64\\Debug\\LibretroHost.h.ifc"
+            ],
+            "provides": [
+                {
+                    "logical-name": "src\\core\\LibretroHost.h",
+                    "source-path": "c:\\users\\iarley\\source\\repos\\syncade\\syncade\\src\\core\\libretrohost.h",
+                    "lookup-method": "absolute"
+                }
+            ],
+            "requires": []
+        }
+    ]
+}

@@ -1,0 +1,22 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "x64\\Debug\\LibretroHost.obj",
+            "outputs": [
+                "x64\\Debug\\LibretroHost.h_A260AFC8A24DAC90.ifc.dt.module.json",
+                "x64\\Debug\\LibretroHost.h_A260AFC8A24DAC90.ifc.dt.d.json",
+                "x64\\Debug\\LibretroHost.h.ifc"
+            ],
+            "provides": [
+                {
+                    "logical-name": "C:\\Users\\Iarley\\source\\repos\\Syncade\\Syncade\\src\\core\\LibretroHost.h",
+                    "source-path": "c:\\users\\iarley\\source\\repos\\syncade\\syncade\\src\\core\\libretrohost.h",
+                    "lookup-method": "absolute"
+                }
+            ],
+            "requires": []
+        }
+    ]
+}
