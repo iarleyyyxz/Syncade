@@ -2,47 +2,127 @@
 #include <iostream>
 #include <cmath>
 #include <vector>
-#include <stdio.h>
+#include <algorithm>
 
-static inline float s16_to_f32(int16_t v) {
-    // converte int16 [-32768..32767] -> float [-1.0..~1.0]
+static inline float s16_to_f32_norm(int16_t v) {
     return static_cast<float>(v) / 32768.0f;
 }
+static inline int16_t f32_to_s16_clamp(float v) {
+    v *= 32767.0f;
+    if (v > 32767.0f) return 32767;
+    if (v < -32768.0f) return -32768;
+    return static_cast<int16_t>(v);
+}
 
+// ---- ring helpers ----
+bool AudioSystem::ring_write(const int16_t* src, size_t samples) {
+    if (samples == 0) return true;
+    // ensure capacity (single-writer, callback-reader); protect with SDL_LockAudioDevice when used
+    size_t free_space = (ring_tail_ + ring_capacity_ - ring_head_ - 1) % ring_capacity_;
+    if (samples > free_space) {
+        // not enough space; drop oldest (advance tail) to make room (keep newest data)
+        size_t need = samples - free_space;
+        size_t drop_frames = (need + 1) / 2; // samples are interleaved, but ring stores samples not frames; drop samples directly
+        ring_tail_ = (ring_tail_ + drop_frames) % ring_capacity_;
+    }
+
+    size_t first = std::min(samples, ring_capacity_ - ring_head_);
+    std::copy(src, src + first, ring_.begin() + ring_head_);
+    if (samples > first) {
+        std::copy(src + first, src + samples, ring_.begin());
+    }
+    ring_head_ = (ring_head_ + samples) % ring_capacity_;
+    return true;
+}
+
+size_t AudioSystem::ring_read(int16_t* dst, size_t samples) {
+    size_t available = (ring_head_ + ring_capacity_ - ring_tail_) % ring_capacity_;
+    size_t to_read = std::min(samples, available);
+    size_t first = std::min(to_read, ring_capacity_ - ring_tail_);
+    std::copy(ring_.begin() + ring_tail_, ring_.begin() + ring_tail_ + first, dst);
+    if (to_read > first) {
+        std::copy(ring_.begin(), ring_.begin() + (to_read - first), dst + first);
+    }
+    ring_tail_ = (ring_tail_ + to_read) % ring_capacity_;
+    return to_read;
+}
+
+// ---- resampler linear ----
+std::vector<int16_t> AudioSystem::resample_linear(const int16_t* in, size_t in_frames, int in_rate, int out_rate) {
+    if (in_rate == out_rate || in_frames == 0) {
+        return std::vector<int16_t>(in, in + (in_frames * 2));
+    }
+    double ratio = static_cast<double>(out_rate) / static_cast<double>(in_rate);
+    size_t out_frames = static_cast<size_t>(std::ceil(in_frames * ratio));
+    std::vector<int16_t> out(out_frames * 2);
+    for (size_t i = 0; i < out_frames; ++i) {
+        double src_pos = static_cast<double>(i) / ratio;
+        size_t idx = static_cast<size_t>(std::floor(src_pos));
+        double frac = src_pos - idx;
+        // clamp indices
+        size_t idx1 = std::min(idx, in_frames - 1);
+        size_t idx2 = std::min(idx + 1, in_frames - 1);
+        int16_t l1 = in[2 * idx1 + 0];
+        int16_t r1 = in[2 * idx1 + 1];
+        int16_t l2 = in[2 * idx2 + 0];
+        int16_t r2 = in[2 * idx2 + 1];
+        float lf = static_cast<float>(l1) * (1.0f - static_cast<float>(frac)) + static_cast<float>(l2) * static_cast<float>(frac);
+        float rf = static_cast<float>(r1) * (1.0f - static_cast<float>(frac)) + static_cast<float>(r2) * static_cast<float>(frac);
+        out[2 * i + 0] = static_cast<int16_t>(lf);
+        out[2 * i + 1] = static_cast<int16_t>(rf);
+    }
+    return out;
+}
+
+// ---- audio callback ----
+void AudioSystem::audio_callback(void* userdata, Uint8* stream, int len) {
+    AudioSystem* self = reinterpret_cast<AudioSystem*>(userdata);
+    if (!self) {
+        SDL_memset(stream, 0, len);
+        return;
+    }
+
+    // expecting device channels; we store int16 interleaved in ring
+    int16_t* out = reinterpret_cast<int16_t*>(stream);
+    size_t samples_needed = static_cast<size_t>(len) / sizeof(int16_t);
+
+    // read available
+    size_t read = self->ring_read(out, samples_needed);
+    if (read < samples_needed) {
+        // zero the rest (silence)
+        size_t bytes = (samples_needed - read) * sizeof(int16_t);
+        std::memset(out + read, 0, bytes);
+    }
+
+    // apply gain in-place (simple)
+    if (self->gain_ != 1.0f && self->gain_ > 0.0f) {
+        for (size_t i = 0; i < samples_needed; ++i) {
+            float f = s16_to_f32_norm(out[i]) * self->gain_;
+            out[i] = f32_to_s16_clamp(f);
+        }
+    }
+}
+
+// ---- public API ----
 bool AudioSystem::init(int rate) {
-    // se já estiver inicializado com mesma taxa, nada a fazer
+    // already opened with same rate?
     if (dev && sample_rate_ == rate) return true;
 
-    // se estiver inicializado com taxa diferente, fechar e reabrir
-    if (dev) {
-        SDL_ClearQueuedAudio(dev);
-        SDL_CloseAudioDevice(dev);
-        dev = 0;
-        sample_rate_ = 0;
-        device_format_ = 0;
-        device_channels_ = 0;
-    }
-
-    // listar dispositivos disponíveis para diagnóstico
-    int numDevices = SDL_GetNumAudioDevices(0);
-    std::cerr << "[audio] SDL reported " << numDevices << " output device(s)\n";
-    for (int i = 0; i < numDevices; ++i) {
-        const char* name = SDL_GetAudioDeviceName(i, 0);
-        std::cerr << "[audio]   device[" << i << "] = " << (name ? name : "(null)") << "\n";
-    }
+    shutdown(); // ensure closed
 
     SDL_AudioSpec want{};
     SDL_AudioSpec have{};
     want.freq = rate;
-    want.format = AUDIO_S16SYS;
+    want.format = AUDIO_S16SYS; // we'll keep ring as int16
     want.channels = 2;
-    want.samples = 1024;
-    want.callback = nullptr;
+    // choose small buffer for lower latency; increase if underruns occur
+    want.samples = 512;
+    want.callback = AudioSystem::audio_callback;
+    want.userdata = this;
 
-    dev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_FORMAT_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE);
+    dev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
     if (dev == 0) {
-        std::cerr << "SDL_OpenAudioDevice failed (wanted " << rate << " Hz): " << SDL_GetError() << "\n";
-        sample_rate_ = 0;
+        std::cerr << "[audio] SDL_OpenAudioDevice failed: " << SDL_GetError() << "\n";
         return false;
     }
 
@@ -50,149 +130,50 @@ bool AudioSystem::init(int rate) {
     device_format_ = have.format;
     device_channels_ = have.channels;
 
-    // start playback
-    SDL_PauseAudioDevice(dev, 0);
+    // allocate ring buffer: 2 seconds of audio (frames * channels)
+    const double seconds = 2.0;
+    ring_capacity_ = static_cast<size_t>(std::max(512u, static_cast<unsigned>(sample_rate_ * device_channels_ * seconds)));
+    ring_.assign(ring_capacity_, 0);
+    ring_head_ = ring_tail_ = 0;
 
-    std::cout << "Audio opened: device=" << dev << " rate=" << have.freq
-        << " fmt=0x" << std::hex << have.format << std::dec
-        << " chans=" << static_cast<int>(have.channels)
-        << " samples=" << have.samples << "\n";
+    std::cerr << "[audio] opened device dev=" << dev << " rate=" << sample_rate_
+        << " fmt=0x" << std::hex << device_format_ << std::dec
+        << " chans=" << device_channels_ << " ring_capacity(samples)=" << ring_capacity_ << "\n";
 
-    // Push a short test tone (100 ms) to verify audio path immediately
-    {
-        const double freq = 440.0;
-        const double duration_s = 0.1;
-        const int sr = sample_rate_;
-        const size_t frames = static_cast<size_t>(duration_s * sr);
-
-        if (device_format_ == AUDIO_F32SYS) {
-            // gerar float32 interleaved stereo
-            std::vector<float> buf(frames * device_channels_);
-            for (size_t i = 0; i < frames; ++i) {
-                double t = static_cast<double>(i) / sr;
-                double s = std::sin(2.0 * M_PI * freq * t) * 0.25;
-                float v = static_cast<float>(s);
-                if (device_channels_ == 1) {
-                    buf[i] = v;
-                }
-                else {
-                    buf[2 * i + 0] = v;
-                    buf[2 * i + 1] = v;
-                }
-            }
-            if (SDL_QueueAudio(dev, buf.data(), static_cast<Uint32>(buf.size() * sizeof(float))) != 0) {
-                std::cerr << "[audio] SDL_QueueAudio (test tone float) failed: " << SDL_GetError() << "\n";
-            }
-            else {
-                std::cerr << "[audio] test tone queued (" << frames << " frames, float32)\n";
-            }
-        }
-        else {
-            // gerar int16 interleaved stereo (compatível com AUDIO_S16SYS)
-            std::vector<int16_t> buf(frames * device_channels_);
-            for (size_t i = 0; i < frames; ++i) {
-                double t = static_cast<double>(i) / sr;
-                double s = std::sin(2.0 * M_PI * freq * t) * 0.25;
-                int16_t v = static_cast<int16_t>(s * 32767.0);
-                if (device_channels_ == 1) {
-                    buf[i] = v;
-                }
-                else {
-                    buf[2 * i + 0] = v;
-                    buf[2 * i + 1] = v;
-                }
-            }
-            if (SDL_QueueAudio(dev, buf.data(), static_cast<Uint32>(buf.size() * sizeof(int16_t))) != 0) {
-                std::cerr << "[audio] SDL_QueueAudio (test tone s16) failed: " << SDL_GetError() << "\n";
-            }
-            else {
-                std::cerr << "[audio] test tone queued (" << frames << " frames, s16)\n";
-            }
-        }
-    }
-
+    SDL_PauseAudioDevice(dev, 0); // start callback
     return true;
 }
 
-void AudioSystem::push(const int16_t* data, size_t frames) {
-    if (!dev) return;
+void AudioSystem::push(const int16_t* data, size_t frames, int core_sample_rate) {
+    if (!dev || frames == 0) return;
 
-    // if device expects s16 stereo and we have same channels -> direct queue
-    if (device_format_ == AUDIO_S16SYS && device_channels_ == 2) {
-        const size_t bytes = frames * 2 * sizeof(int16_t);
-        if (SDL_QueueAudio(dev, data, static_cast<Uint32>(bytes)) != 0) {
-            std::cerr << "SDL_QueueAudio failed: " << SDL_GetError() << "\n";
-        }
-        else {
-            static int call_count = 0;
-            ++call_count;
-            if (call_count <= 3) {
-                Uint32 queued = SDL_GetQueuedAudioSize(dev);
-                std::cerr << "[audio] pushed " << frames << " frames (" << bytes << " bytes). queued=" << queued << " bytes\n";
-            }
-        }
-        return;
+    // prepare buffer in device sample rate
+    std::vector<int16_t> out;
+    if (core_sample_rate > 0 && core_sample_rate != sample_rate_) {
+        out = resample_linear(data, frames, core_sample_rate, sample_rate_);
+    }
+    else if (sample_rate_ != 0 && core_sample_rate == 0) {
+        // no core rate provided — assume same (no resample)
+        out.assign(data, data + frames * 2);
+    }
+    else {
+        out.assign(data, data + frames * 2);
     }
 
-    // otherwise, convert from int16_stereo -> device_format_/device_channels_
-    if (device_format_ == AUDIO_F32SYS) {
-        // convert to float32
-        if (device_channels_ == 2) {
-            std::vector<float> buf(frames * 2);
-            for (size_t i = 0; i < frames; ++i) {
-                buf[2 * i + 0] = s16_to_f32(data[2 * i + 0]);
-                buf[2 * i + 1] = s16_to_f32(data[2 * i + 1]);
-            }
-            if (SDL_QueueAudio(dev, buf.data(), static_cast<Uint32>(buf.size() * sizeof(float))) != 0) {
-                std::cerr << "SDL_QueueAudio (f32) failed: " << SDL_GetError() << "\n";
-            }
-        }
-        else if (device_channels_ == 1) {
-            std::vector<float> buf(frames);
-            for (size_t i = 0; i < frames; ++i) {
-                // downmix stereo -> mono by average
-                float l = s16_to_f32(data[2 * i + 0]);
-                float r = s16_to_f32(data[2 * i + 1]);
-                buf[i] = (l + r) * 0.5f;
-            }
-            if (SDL_QueueAudio(dev, buf.data(), static_cast<Uint32>(buf.size() * sizeof(float))) != 0) {
-                std::cerr << "SDL_QueueAudio (f32 mono) failed: " << SDL_GetError() << "\n";
-            }
-        }
-        else {
-            std::cerr << "[audio] unsupported device channel count: " << device_channels_ << "\n";
-        }
-        return;
-    }
-
-    // fallback: device wants s16 but mono/stereo mismatch
-    if (device_format_ == AUDIO_S16SYS) {
-        if (device_channels_ == 1) {
-            std::vector<int16_t> buf(frames);
-            for (size_t i = 0; i < frames; ++i) {
-                int32_t sum = static_cast<int32_t>(data[2 * i + 0]) + static_cast<int32_t>(data[2 * i + 1]);
-                buf[i] = static_cast<int16_t>(sum / 2);
-            }
-            if (SDL_QueueAudio(dev, buf.data(), static_cast<Uint32>(buf.size() * sizeof(int16_t))) != 0) {
-                std::cerr << "SDL_QueueAudio (s16 mono) failed: " << SDL_GetError() << "\n";
-            }
-            return;
-        }
-        else {
-            std::cerr << "[audio] unsupported device channel count for s16: " << device_channels_ << "\n";
-            return;
-        }
-    }
-
-    std::cerr << "[audio] unsupported device format 0x" << std::hex << device_format_ << std::dec << "\n";
+    // write to ring with lock
+    SDL_LockAudioDevice(dev);
+    ring_write(out.data(), out.size());
+    SDL_UnlockAudioDevice(dev);
 }
 
 void AudioSystem::shutdown() {
     if (!dev) return;
-    SDL_ClearQueuedAudio(dev);
+    SDL_PauseAudioDevice(dev, 1);
     SDL_CloseAudioDevice(dev);
     dev = 0;
     sample_rate_ = 0;
     device_format_ = 0;
     device_channels_ = 0;
+    ring_.clear();
+    ring_capacity_ = ring_head_ = ring_tail_ = 0;
 }
