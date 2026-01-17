@@ -26,8 +26,8 @@ private:
     // audio callback (pull)
     static void audio_callback(void* userdata, Uint8* stream, int len);
 
-    // resample int16 stereo linear (in_rate -> out_rate)
-    std::vector<int16_t> resample_linear(const int16_t* in, size_t in_frames, int in_rate, int out_rate);
+    // resample de melhor qualidade (Catmull-Rom / cubic) de int16 stereo
+    std::vector<int16_t> resample_cubic(const int16_t* in, size_t in_frames, int in_rate, int out_rate);
 
     // ring buffer helpers
     bool ring_write(const int16_t* src, size_t samples); // samples = interleaved samples count (frames*channels)
@@ -38,7 +38,7 @@ private:
     SDL_AudioFormat device_format_ = 0;
     int device_channels_ = 0;
 
-    // ring buffer (interleaved samples: int16 or f32 depending on conversion path; we keep int16)
+    // ring buffer (interleaved samples: int16)
     std::vector<int16_t> ring_;
     size_t ring_head_ = 0; // write pos
     size_t ring_tail_ = 0; // read pos

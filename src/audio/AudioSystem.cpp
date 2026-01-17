@@ -22,8 +22,7 @@ bool AudioSystem::ring_write(const int16_t* src, size_t samples) {
     if (samples > free_space) {
         // not enough space; drop oldest (advance tail) to make room (keep newest data)
         size_t need = samples - free_space;
-        size_t drop_frames = (need + 1) / 2; // samples are interleaved, but ring stores samples not frames; drop samples directly
-        ring_tail_ = (ring_tail_ + drop_frames) % ring_capacity_;
+        ring_tail_ = (ring_tail_ + need) % ring_capacity_;
     }
 
     size_t first = std::min(samples, ring_capacity_ - ring_head_);
@@ -47,30 +46,65 @@ size_t AudioSystem::ring_read(int16_t* dst, size_t samples) {
     return to_read;
 }
 
-// ---- resampler linear ----
-std::vector<int16_t> AudioSystem::resample_linear(const int16_t* in, size_t in_frames, int in_rate, int out_rate) {
-    if (in_rate == out_rate || in_frames == 0) {
-        return std::vector<int16_t>(in, in + (in_frames * 2));
-    }
-    double ratio = static_cast<double>(out_rate) / static_cast<double>(in_rate);
-    size_t out_frames = static_cast<size_t>(std::ceil(in_frames * ratio));
+// ---- resampler cubic (Catmull-Rom) ----
+// Produz saída interleaved int16 stereo.
+// Formula Catmull-Rom (centripetal/catrom) simplificada com tensão 0.5
+std::vector<int16_t> AudioSystem::resample_cubic(const int16_t* in, size_t in_frames, int in_rate, int out_rate) {
+    if (in_frames == 0) return {};
+    if (in_rate == out_rate) return std::vector<int16_t>(in, in + (in_frames * 2));
+
+    const double scale = static_cast<double>(in_rate) / static_cast<double>(out_rate);
+    size_t out_frames = static_cast<size_t>(std::ceil(in_frames / scale));
+
     std::vector<int16_t> out(out_frames * 2);
+
+    auto sample = [&](size_t frame, int ch) -> float {
+        // clamp frame index to available frames
+        if (frame >= in_frames) frame = in_frames - 1;
+        return static_cast<float>(in[2 * frame + ch]);
+        };
+
     for (size_t i = 0; i < out_frames; ++i) {
-        double src_pos = static_cast<double>(i) / ratio;
-        size_t idx = static_cast<size_t>(std::floor(src_pos));
-        double frac = src_pos - idx;
-        // clamp indices
-        size_t idx1 = std::min(idx, in_frames - 1);
-        size_t idx2 = std::min(idx + 1, in_frames - 1);
-        int16_t l1 = in[2 * idx1 + 0];
-        int16_t r1 = in[2 * idx1 + 1];
-        int16_t l2 = in[2 * idx2 + 0];
-        int16_t r2 = in[2 * idx2 + 1];
-        float lf = static_cast<float>(l1) * (1.0f - static_cast<float>(frac)) + static_cast<float>(l2) * static_cast<float>(frac);
-        float rf = static_cast<float>(r1) * (1.0f - static_cast<float>(frac)) + static_cast<float>(r2) * static_cast<float>(frac);
-        out[2 * i + 0] = static_cast<int16_t>(lf);
-        out[2 * i + 1] = static_cast<int16_t>(rf);
+        double src_pos = static_cast<double>(i) * scale;
+        size_t idx = (src_pos >= 1.0) ? static_cast<size_t>(std::floor(src_pos)) : 0;
+        double frac = src_pos - static_cast<double>(idx);
+
+        // indices p0..p3
+        size_t i0 = (idx == 0) ? 0 : idx - 1;
+        size_t i1 = idx;
+        size_t i2 = std::min(idx + 1, in_frames - 1);
+        size_t i3 = std::min(idx + 2, in_frames - 1);
+
+        // for each channel
+        for (int ch = 0; ch < 2; ++ch) {
+            float p0 = sample(i0, ch);
+            float p1 = sample(i1, ch);
+            float p2 = sample(i2, ch);
+            float p3 = sample(i3, ch);
+
+            // Catmull-Rom spline interpolation
+            // t = frac
+            float t = static_cast<float>(frac);
+            float t2 = t * t;
+            float t3 = t2 * t;
+
+            // Catmull-Rom with tension 0.5:
+            float a = -0.5f * p0 + 1.5f * p1 - 1.5f * p2 + 0.5f * p3;
+            float b = p0 - 2.5f * p1 + 2.0f * p2 - 0.5f * p3;
+            float c = -0.5f * p0 + 0.5f * p2;
+            float d = p1;
+
+            float val = a * t3 + b * t2 + c * t + d;
+
+            // clamp and store
+            // val currently in int16 range because pN are int16 values; cast safely
+            int32_t iv = static_cast<int32_t>(std::lrintf(val));
+            if (iv > 32767) iv = 32767;
+            if (iv < -32768) iv = -32768;
+            out[2 * i + ch] = static_cast<int16_t>(iv);
+        }
     }
+
     return out;
 }
 
@@ -82,19 +116,15 @@ void AudioSystem::audio_callback(void* userdata, Uint8* stream, int len) {
         return;
     }
 
-    // expecting device channels; we store int16 interleaved in ring
     int16_t* out = reinterpret_cast<int16_t*>(stream);
     size_t samples_needed = static_cast<size_t>(len) / sizeof(int16_t);
 
-    // read available
     size_t read = self->ring_read(out, samples_needed);
     if (read < samples_needed) {
-        // zero the rest (silence)
         size_t bytes = (samples_needed - read) * sizeof(int16_t);
         std::memset(out + read, 0, bytes);
     }
 
-    // apply gain in-place (simple)
     if (self->gain_ != 1.0f && self->gain_ > 0.0f) {
         for (size_t i = 0; i < samples_needed; ++i) {
             float f = s16_to_f32_norm(out[i]) * self->gain_;
@@ -147,20 +177,17 @@ bool AudioSystem::init(int rate) {
 void AudioSystem::push(const int16_t* data, size_t frames, int core_sample_rate) {
     if (!dev || frames == 0) return;
 
-    // prepare buffer in device sample rate
     std::vector<int16_t> out;
     if (core_sample_rate > 0 && core_sample_rate != sample_rate_) {
-        out = resample_linear(data, frames, core_sample_rate, sample_rate_);
+        out = resample_cubic(data, frames, core_sample_rate, sample_rate_);
     }
     else if (sample_rate_ != 0 && core_sample_rate == 0) {
-        // no core rate provided — assume same (no resample)
         out.assign(data, data + frames * 2);
     }
     else {
         out.assign(data, data + frames * 2);
     }
 
-    // write to ring with lock
     SDL_LockAudioDevice(dev);
     ring_write(out.data(), out.size());
     SDL_UnlockAudioDevice(dev);

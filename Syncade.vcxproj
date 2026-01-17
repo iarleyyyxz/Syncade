@@ -111,7 +111,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>C:\Users\Iarley\source\repos\Syncade\Syncade\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>SDL2.lib;SDL2main.lib;SDL2test.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>SDL2.lib;SDL2test.lib;glfw3.lib;glfw3_mt.lib;glfw3dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -129,7 +129,7 @@
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalLibraryDirectories>C:\Users\Iarley\source\repos\Syncade\Syncade\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>SDL2.lib;SDL2main.lib;SDL2test.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>SDL2.lib;SDL2test.lib;glfw3.lib;glfw3_mt.lib;glfw3dll.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -138,14 +138,21 @@
     <ClInclude Include="src\core\LibretroCore.h" />
     <ClInclude Include="src\input\InputSystem.h" />
     <ClInclude Include="src\Timing.h" />
+    <ClInclude Include="src\video\Framebuffer.h" />
+    <ClInclude Include="src\video\GameRenderPass.h" />
+    <ClInclude Include="src\video\LibretroVideo.h" />
     <ClInclude Include="src\video\VideoSystem.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="..\..\..\..\Documents\lib\glad\src\glad.c" />
     <ClCompile Include="src\audio\AudioSystem.cpp" />
     <ClCompile Include="src\core\LibretroCore.cpp" />
     <ClCompile Include="src\core\LibretroHost.h" />
     <ClCompile Include="src\input\InputSystem.cpp" />
     <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\video\Framebuffer.cpp" />
+    <ClCompile Include="src\video\GameRenderPass.cpp" />
+    <ClCompile Include="src\video\LibretroVideo.cpp" />
     <ClCompile Include="src\video\VideoSystem.cpp" />
   </ItemGroup>
   <ItemGroup>

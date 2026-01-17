@@ -1,28 +1,28 @@
 #include "InputSystem.h"
 
-int16_t InputSystem::state(unsigned id) {
-    const Uint8* k = SDL_GetKeyboardState(nullptr);
-    if (binds.count(id)) return k[binds[id]];
-    return 0;
+InputSystem::InputSystem() {
+    binds_[RETRO_DEVICE_ID_JOYPAD_UP] = GLFW_KEY_UP;
+    binds_[RETRO_DEVICE_ID_JOYPAD_DOWN] = GLFW_KEY_DOWN;
+    binds_[RETRO_DEVICE_ID_JOYPAD_LEFT] = GLFW_KEY_LEFT;
+    binds_[RETRO_DEVICE_ID_JOYPAD_RIGHT] = GLFW_KEY_RIGHT;
+    binds_[RETRO_DEVICE_ID_JOYPAD_A] = GLFW_KEY_X;
+    binds_[RETRO_DEVICE_ID_JOYPAD_B] = GLFW_KEY_Z;
+    binds_[RETRO_DEVICE_ID_JOYPAD_X] = GLFW_KEY_S;
+    binds_[RETRO_DEVICE_ID_JOYPAD_Y] = GLFW_KEY_A;
+    binds_[RETRO_DEVICE_ID_JOYPAD_L] = GLFW_KEY_Q;
+    binds_[RETRO_DEVICE_ID_JOYPAD_R] = GLFW_KEY_W;
+    binds_[RETRO_DEVICE_ID_JOYPAD_START] = GLFW_KEY_ENTER;
+    binds_[RETRO_DEVICE_ID_JOYPAD_SELECT] = GLFW_KEY_RIGHT_SHIFT;
 }
 
-void InputSystem::setKey(unsigned id, SDL_Scancode scancode) {
-    binds[id] = scancode;
+void InputSystem::update(GLFWwindow* window) {
+    for (auto const& [retro_id, glfw_key] : binds_) {
+        // Leitura direta do hardware via GLFW
+        states_[retro_id] = (glfwGetKey(window, glfw_key) == GLFW_PRESS) ? 1 : 0;
+    }
 }
 
-void InputSystem::reset() {
-    binds = {
-        { RETRO_DEVICE_ID_JOYPAD_UP,     SDL_SCANCODE_UP },
-        { RETRO_DEVICE_ID_JOYPAD_DOWN,   SDL_SCANCODE_DOWN },
-        { RETRO_DEVICE_ID_JOYPAD_LEFT,   SDL_SCANCODE_LEFT },
-        { RETRO_DEVICE_ID_JOYPAD_RIGHT,  SDL_SCANCODE_RIGHT },
-        { RETRO_DEVICE_ID_JOYPAD_A,      SDL_SCANCODE_Z },       // A
-        { RETRO_DEVICE_ID_JOYPAD_B,      SDL_SCANCODE_X },       // B
-        { RETRO_DEVICE_ID_JOYPAD_X,      SDL_SCANCODE_A },       // X
-        { RETRO_DEVICE_ID_JOYPAD_Y,      SDL_SCANCODE_S },       // Y
-        { RETRO_DEVICE_ID_JOYPAD_L,      SDL_SCANCODE_Q },       // L
-        { RETRO_DEVICE_ID_JOYPAD_R,      SDL_SCANCODE_W },       // R
-        { RETRO_DEVICE_ID_JOYPAD_START,  SDL_SCANCODE_RETURN },  // Start
-        { RETRO_DEVICE_ID_JOYPAD_SELECT, SDL_SCANCODE_RSHIFT }   // Select
-	};
+int16_t InputSystem::state(unsigned id) const {
+    auto it = states_.find(id);
+    return (it != states_.end()) ? it->second : 0;
 }

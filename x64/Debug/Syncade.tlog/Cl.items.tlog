@@ -1,6 +1,10 @@
+C:\Users\Iarley\Documents\lib\glad\src\glad.c;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\glad.obj
 C:\Users\Iarley\source\repos\Syncade\Syncade\src\audio\AudioSystem.cpp;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\AudioSystem.obj
 C:\Users\Iarley\source\repos\Syncade\Syncade\src\core\LibretroCore.cpp;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\LibretroCore.obj
 C:\Users\Iarley\source\repos\Syncade\Syncade\src\core\LibretroHost.h;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\LibretroHost.h.obj
 C:\Users\Iarley\source\repos\Syncade\Syncade\src\input\InputSystem.cpp;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\InputSystem.obj
 C:\Users\Iarley\source\repos\Syncade\Syncade\src\main.cpp;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\main.obj
+C:\Users\Iarley\source\repos\Syncade\Syncade\src\video\Framebuffer.cpp;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\Framebuffer.obj
+C:\Users\Iarley\source\repos\Syncade\Syncade\src\video\GameRenderPass.cpp;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\GameRenderPass.obj
+C:\Users\Iarley\source\repos\Syncade\Syncade\src\video\LibretroVideo.cpp;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\LibretroVideo.obj
 C:\Users\Iarley\source\repos\Syncade\Syncade\src\video\VideoSystem.cpp;C:\Users\Iarley\source\repos\Syncade\Syncade\x64\Debug\VideoSystem.obj
